@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out project
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Restore notifier state
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: |
             last_draw_*.txt
@@ -26,7 +26,7 @@ jobs:
           restore-keys: loto-state-
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -44,8 +44,14 @@ jobs:
           MOBIZON_API_KEY: ${{ secrets.MOBIZON_API_KEY }}
         run: python main.py --once
 
-      - name: Save notifier state
-        uses: actions/cache/save@v4
+      - name: Prepare notifier state
+        if: always()
+        run: |
+          touch last_draw_536.txt last_draw_649.txt status_536.json status_649.json
+          echo "State files ready for cache"
+
+      - name: Cache notifier state
+        uses: actions/cache/save@v5
         if: always()
         with:
           path: |
