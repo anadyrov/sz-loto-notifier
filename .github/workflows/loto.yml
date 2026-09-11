@@ -2,9 +2,8 @@ name: Loto results notifier
 
 on:
   schedule:
-    # Fallback starts at 21:00, 22:00 and 23:00 Asia/Almaty (16/17/18 UTC).
-    # The first available run owns the evening polling window.
-    - cron: "0 16,17,18 * * *"
+    # Start at 21:05 Asia/Almaty (16:05 UTC), then poll every minute.
+    - cron: "5 16 * * *"
   workflow_dispatch:
 
 permissions:
