@@ -3,6 +3,7 @@ import argparse
 import json
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode
@@ -264,6 +265,11 @@ async def main() -> None:
         action="store_true",
         help="выполнить одну плановую проверку и завершить работу",
     )
+    parser.add_argument(
+        "--window",
+        action="store_true",
+        help="проверять каждую минуту в течение вечернего окна и завершиться",
+    )
     arguments = parser.parse_args()
     if arguments.latest:
         try:
@@ -278,6 +284,16 @@ async def main() -> None:
                 await run_lottery(lottery)
             except Exception as error:
                 print(f"Ошибка проверки {lottery['name']}: {error}", flush=True)
+        return
+    if arguments.window:
+        started_at = time.monotonic()
+        while time.monotonic() - started_at < 3 * 60 * 60:
+            for lottery in LOTTERIES:
+                try:
+                    await run_lottery(lottery)
+                except Exception as error:
+                    print(f"Ошибка проверки {lottery['name']}: {error}", flush=True)
+            await asyncio.sleep(POLL_SECONDS)
         return
     while True:
         for lottery in LOTTERIES:
