@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: loto-results-notifier
+  cancel-in-progress: false
+
 jobs:
   check-results:
     runs-on: ubuntu-latest
