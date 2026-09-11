@@ -112,3 +112,34 @@ git push origin main
 ```
 
 После push GitHub Actions использует новую версию автоматически. Для локального теста сначала запускайте `--once`.
+
+## Watchdog и автоматический перезапуск
+
+GitHub cron может пропустить запуск, поэтому в репозитории есть workflow `Loto workflow watchdog`.
+Он получает внешний `repository_dispatch`, проверяет активные запуски `loto.yml` и запускает основной
+workflow только если активного запуска нет. Параллельные job защищены `concurrency`.
+
+Для работы watchdog нужен один секрет:
+
+```text
+WATCHDOG_PAT
+```
+
+Создайте fine-grained Personal Access Token в GitHub только для репозитория
+`anadyrov/sz-loto-notifier` с правом `Actions: Read and write`, затем добавьте его в
+`Settings -> Secrets and variables -> Actions`. Сам токен в чат не отправляйте.
+
+Внешний бесплатный cron (например, cron-job.org) должен вызывать раз в 5 минут в диапазоне
+21:00-23:59 по Алматы endpoint запуска watchdog:
+
+```text
+POST https://api.github.com/repos/anadyrov/sz-loto-notifier/dispatches
+Authorization: Bearer <WATCHDOG_PAT>
+Accept: application/vnd.github+json
+Content-Type: application/json
+
+{"event_type":"watchdog"}
+```
+
+Важно: один только GitHub Actions не может надежно обнаружить, что его собственный cron не запустился.
+Внешний cron является независимым контролем. Watchdog сам не отправляет результаты и не создает дубли.
