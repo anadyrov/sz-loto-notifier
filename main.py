@@ -247,8 +247,12 @@ async def run_lottery(lottery: dict, force_latest: bool = False) -> None:
         return
     if not force_latest and already_sent(lottery, result["number"]):
         return
-    telegram_send(make_message(lottery, result))
-    sms_send(make_message(lottery, result))
+    message = make_message(lottery, result)
+    telegram_send(message)
+    try:
+        sms_send(message)
+    except Exception as error:
+        print(f"SMS не отправлено для {lottery['name']}: {error}", flush=True)
     mark_sent(lottery, result["number"])
     print(f"Отправлен результат {lottery['name']} тиража {result['number']}", flush=True)
 
