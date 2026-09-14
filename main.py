@@ -90,8 +90,15 @@ async def fetch_result(lottery: dict, target_date=None) -> dict | None:
         )
         try:
             await page.goto(lottery["url"], wait_until="domcontentloaded", timeout=30_000)
-            await page.wait_for_timeout(3000)
-            await page.wait_for_selector("body", timeout=15_000)
+            await page.wait_for_function(
+                """() => {
+                    const title = document.title || '';
+                    const text = document.body?.innerText || '';
+                    return !/just a moment|один момент/i.test(title)
+                        && /Loto\s*5\/36|Результаты тираж/i.test(text);
+                }""",
+                timeout=90_000,
+            )
 
             async def request_srv(data: dict) -> dict | list:
                 raw_response = await page.evaluate(
