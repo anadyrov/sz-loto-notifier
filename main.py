@@ -1,6 +1,7 @@
 import asyncio
 import argparse
 import json
+import html
 import os
 import re
 import time
@@ -17,6 +18,7 @@ from playwright.async_api import async_playwright
 load_dotenv()
 
 SRV_URL = "https://sz.kz/srv"
+MIRROR_URL = "https://lucky-numbers.ru/lottery/kz/5x36"
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Asia/Almaty"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
@@ -75,7 +77,7 @@ def parse_srv_response(raw_response: str) -> dict | list:
     return json.loads(fields["msg"][0])
 
 
-async def fetch_result(lottery: dict, target_date=None) -> dict | None:
+async def fetch_official_result(lottery: dict, target_date=None) -> dict | None:
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(
             headless=True, args=["--disable-blink-features=AutomationControlled"]
@@ -91,7 +93,7 @@ async def fetch_result(lottery: dict, target_date=None) -> dict | None:
         try:
             await page.goto(lottery["url"], wait_until="domcontentloaded", timeout=30_000)
             await page.wait_for_function(
-                """() => {
+                r"""() => {
                     const title = document.title || '';
                     const text = document.body?.innerText || '';
                     return !/just a moment|один момент/i.test(title)
@@ -151,6 +153,62 @@ async def fetch_result(lottery: dict, target_date=None) -> dict | None:
             return None
         finally:
             await browser.close()
+
+
+def parse_mirror_results(page_html: str) -> list[dict]:
+    results = []
+    rows = re.findall(
+        r'<tr class="lresults-row[\s\S]*?</tr>', page_html, re.IGNORECASE
+    )
+    for row in rows:
+        balls = []
+        for button in re.findall(r"<button[^>]*>([\s\S]*?)</button>", row, re.IGNORECASE):
+            value = re.sub(r"<[^>]+>", "", button).strip()
+            if value.isdigit() and 1 <= int(value) <= 36:
+                balls.append(int(value))
+        date_match = re.search(r"<time[^>]*>(\d{2}\.\d{2}\.\d{2}),", row)
+        text = html.unescape(re.sub(r"<[^>]+>", " ", row))
+        text = re.sub(r"\s+", " ", text).strip()
+        draw_match = re.search(
+            r"(\d[\d ]*)\s+(\d{2}\.\d{2}\.\d{2}),\s*21:00", text
+        )
+        if len(balls) >= 5 and date_match and draw_match:
+            date_short = date_match.group(1)
+            results.append(
+                {
+                    "number": str(int(draw_match.group(1).replace(" ", ""))),
+                    "date": f"{date_short[:6]}20{date_short[6:]}",
+                    "numbers": balls[:5],
+                    "bonus_numbers": [],
+                }
+            )
+    return results
+
+
+def fetch_mirror_result(target_date=None) -> dict | None:
+    response = requests.get(
+        MIRROR_URL,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; Loto536Notifier/1.0)"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    results = parse_mirror_results(response.text)
+    if not results:
+        raise RuntimeError("Зеркало не вернуло тиражи 5/36")
+    if target_date is None:
+        return results[0]
+    for result in results:
+        if datetime.strptime(result["date"], "%d.%m.%Y").date() == target_date:
+            return result
+    return None
+
+
+async def fetch_result(lottery: dict, target_date=None) -> dict | None:
+    try:
+        return fetch_mirror_result(target_date)
+    except Exception as mirror_error:
+        print(f"Ошибка зеркала, пробую SZ.KZ: {mirror_error}", flush=True)
+        return await fetch_official_result(lottery, target_date)
 
 
 async def fetch_today_result(lottery: dict) -> dict | None:
