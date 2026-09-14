@@ -28,8 +28,8 @@ jobs:
             status_536.json
             last_draw_649.txt
             status_649.json
-          key: loto-state-${{ github.run_id }}
-          restore-keys: loto-state-
+          key: loto-${{ github.event.action == 'loto649' && '649' || github.event.action == 'loto536' && '536' || 'manual' }}-state-${{ github.run_id }}
+          restore-keys: loto-${{ github.event.action == 'loto649' && '649' || github.event.action == 'loto536' && '536' || 'manual' }}-state-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -71,4 +71,4 @@ jobs:
             status_536.json
             last_draw_649.txt
             status_649.json
-          key: loto-state-${{ github.run_id }}
+          key: loto-${{ github.event.action == 'loto649' && '649' || github.event.action == 'loto536' && '536' || 'manual' }}-state-${{ github.run_id }}

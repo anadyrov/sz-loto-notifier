@@ -1,145 +1,101 @@
-# Инструкция по сервису SZ.KZ
+# Эксплуатация SZ Loto Notifier
 
-## Что делает сервис
+Актуально на 14 сентября 2026 года.
 
-Сервис проверяет результаты двух игр АО «Сәтті Жұлдыз» и отправляет уведомления:
+## Назначение
 
-- Loto 5/36: начало проверок в 21:05 по времени Алматы;
-- Loto 6/49: начало проверок в 22:05 по времени Алматы;
-- после начала проверки запрос повторяется каждую минуту локально;
-- GitHub Actions запускает один job в 21:00 по Алматы, а job проверяет сайт каждую минуту около трех часов;
-- один и тот же тираж не отправляется повторно;
-- для 6/49 бонусный шар отправляется отдельной строкой.
+Сервис отправляет результаты двух лотерей в Telegram:
 
-## Каналы уведомлений
+- Loto 5/36 — внешний запуск ежедневно в 21:05 Asia/Almaty;
+- Loto 6/49 — внешний запуск ежедневно в 22:05 Asia/Almaty;
+- если результат ещё не опубликован, GitHub Actions повторяет проверку каждую минуту до трёх часов;
+- один тираж не отправляется повторно;
+- для 6/49 бонусный шар выводится отдельно.
 
-Telegram является основным каналом. SMS через Mobizon подключается только при `SMS_ENABLED=true`.
-Если SMS отключены или Mobizon не принимает направление, Telegram продолжает работать.
+Ноутбук пользователя не участвует. Цепочка: cron-job.org → GitHub repository_dispatch → GitHub Actions → API результатов → Telegram.
 
-Сервис также отправляет не чаще одного раза в день диагностические сообщения:
+## Настройки cron-job.org
 
-- сайт SZ.KZ недоступен;
-- результат еще не опубликован.
+Обе задачи используют:
 
-После появления результата отправляется обычное уведомление с номером тиража и числами.
-
-## Файлы
-
-- `main.py` - основная логика проверки и отправки;
-- `requirements.txt` - Python-зависимости;
-- `.env.example` - пример локальной конфигурации;
-- `.github/workflows/loto.yml` - расписание GitHub Actions;
-- `last_draw_536.txt`, `last_draw_649.txt` - состояние последних отправленных тиражей;
-- `status_536.json`, `status_649.json` - состояние диагностических уведомлений.
-
-Файлы `.env`, `.venv`, состояния и API-ключи не должны попадать в Git.
-
-## Локальный запуск
-
-Из каталога проекта:
-
-```powershell
-cd C:\Users\anadyrov\.codex\sz_tools
-.\.venv\Scripts\python.exe main.py
+```text
+URL: https://api.github.com/repos/anadyrov/sz-loto-notifier/dispatches
+Method: POST
+Timezone: Asia/Almaty
+Basic HTTP authentication: OFF
+Accept: application/vnd.github+json
+Authorization: Bearer <FINE_GRAINED_PAT>
+Content-Type: application/json
 ```
 
-Одноразовая проверка последних опубликованных результатов:
+Токен GitHub должен иметь доступ только к репозиторию `anadyrov/sz-loto-notifier` и разрешение `Contents: Read and write`.
 
-```powershell
-.\.venv\Scripts\python.exe main.py --latest
+Задача `Loto_536`:
+
+```text
+Schedule: daily 21:05
+Body: {"event_type":"loto536"}
 ```
 
-Одна плановая проверка без бесконечного цикла:
+Задача `Loto_649`:
 
-```powershell
-.\.venv\Scripts\python.exe main.py --once
+```text
+Schedule: daily 22:05
+Body: {"event_type":"loto649"}
 ```
+
+Успешный тест cron-job.org возвращает `204 No Content`. Это подтверждает приём события GitHub, но не завершение workflow. Дневной тест до времени тиража быстро завершается без рассылки.
 
 ## GitHub Actions
 
-Репозиторий: https://github.com/anadyrov/sz-loto-notifier
+Workflow: `.github/workflows/loto.yml` (`Loto 5/36 and 6/49 notifier`).
 
-Workflow: `Loto results notifier`.
+- `loto536` запускает `python main.py --window --game 536`;
+- `loto649` запускает `python main.py --window --game 649`;
+- старый `watchdog` сохранён как совместимость и обрабатывается как 5/36;
+- ручной `workflow_dispatch` выполняет безопасный `--probe`: проверяет Telegram и оба источника, но не рассылает результаты.
 
-В GitHub откройте `Settings -> Secrets and variables -> Actions` и добавьте Secrets:
+GitHub Secrets:
 
 ```text
 TELEGRAM_BOT_TOKEN
 TELEGRAM_CHAT_ID
-SMS_ENABLED
-SMS_PHONE
-MOBIZON_API_KEY
 ```
 
-Значения секретов не записываются в репозиторий. Для временного отключения SMS установите:
+SMS сейчас принудительно выключены в workflow (`SMS_ENABLED=false`). Состояние сохраняется в GitHub Actions cache раздельно для 5/36 и 6/49.
+
+## Источники результатов
+
+Основные облачно-доступные JSON endpoints:
 
 ```text
-SMS_ENABLED=false
+https://lucky-numbers.ru/api/v1/lottery/kz/5x36/results?limit=10
+https://lucky-numbers.ru/api/v1/lottery/kz/6x49/results?limit=10
 ```
 
-Для ручного запуска: `Actions -> Loto results notifier -> Run workflow`.
+Официальный SZ.KZ используется как резервный источник через Playwright. Cloudflare может блокировать IP GitHub Runner, поэтому JSON endpoint является основным.
 
-Расписание cron указано в UTC: `16:05 UTC` соответствует `21:05` по Алматы.
-После старта один длительный job проверяет результаты каждую минуту примерно три часа:
-5/36 после 21:05, 6/49 после 22:05.
+## Проверка и диагностика
 
-## SMS Mobizon
+1. На cron-job.org проверить `History`: запрос должен получить 204.
+2. Открыть https://github.com/anadyrov/sz-loto-notifier/actions и найти запуск соответствующего времени.
+3. Успешный workflow должен быть зелёным. В шаге `Poll SZ.KZ and notify Telegram` видны номер тиража или сообщения об ожидании.
+4. При 401 проверить имя заголовка `Authorization` и значение `Bearer <token>`.
+5. При 404 проверить URL, доступ PAT к репозиторию и `Contents: Read and write`.
+6. Если 204 есть, но workflow отсутствует, проверить точное тело `loto536`/`loto649`.
+7. Если workflow зелёный, но Telegram пуст, проверить GitHub Secrets и чат с ботом.
 
-API Mobizon использует endpoint `https://api.mobizon.kz/service/message/sendsmsmessage`.
-Номер передается в формате `770XXXXXXXX`, без плюса, пробелов и дефисов.
+## Безопасность
 
-Если API отвечает, что для направления нет возможности отправки SMS, это ограничение тарифа или оператора,
-а не ошибка Telegram. Нужно обратиться в поддержку Mobizon и попросить разрешить сервисные SMS на направление.
+Никогда не помещать PAT GitHub, Telegram token или `.env` в документацию, Git, чат либо скриншоты. Засвеченный токен немедленно отозвать и заменить. Срок действия PAT нужно контролировать. Текущая HTTP-информация cron показывала окончание токена 13 декабря 2026 года — до этой даты создать новый и заменить его в обеих cron-задачах.
 
-Секреты Mobizon нельзя публиковать в чатах, коммитах или скриншотах. При утечке API-ключ следует обновить в панели Mobizon.
-
-## Безопасность и восстановление
-
-1. Не добавляйте `.env` в Git.
-2. Не вставляйте Telegram-токен и Mobizon API-ключ в Issues, README или сообщения.
-3. При утечке Telegram-токена выполните `/revoke` в `@BotFather`, создайте новый и обновите GitHub Secret.
-4. При утечке Mobizon-ключа нажмите обновление ключа в панели API и замените GitHub Secret.
-5. Если облачный workflow перестал работать, сначала откройте последний запуск в `Actions` и проверьте шаг `Check lottery results once`.
-
-## Изменение проекта
-
-После изменений:
+## Команды разработчика
 
 ```powershell
-git add .
-git commit -m "Describe the change"
-git push origin main
+cd C:\Users\anadyrov\.codex\sz_tools
+.\.venv\Scripts\python.exe -m py_compile main.py
+.\.venv\Scripts\python.exe main.py --probe
+git status --short
 ```
 
-После push GitHub Actions использует новую версию автоматически. Для локального теста сначала запускайте `--once`.
-
-## Watchdog и автоматический перезапуск
-
-GitHub cron может пропустить запуск, поэтому в репозитории есть workflow `Loto workflow watchdog`.
-Он получает внешний `repository_dispatch`, проверяет активные запуски `loto.yml` и запускает основной
-workflow только если активного запуска нет. Параллельные job защищены `concurrency`.
-
-Для работы watchdog нужен один секрет:
-
-```text
-WATCHDOG_PAT
-```
-
-Создайте fine-grained Personal Access Token в GitHub только для репозитория
-`anadyrov/sz-loto-notifier` с правом `Actions: Read and write`, затем добавьте его в
-`Settings -> Secrets and variables -> Actions`. Сам токен в чат не отправляйте.
-
-Внешний бесплатный cron (например, cron-job.org) должен вызывать раз в 5 минут в диапазоне
-21:00-23:59 по Алматы endpoint запуска watchdog:
-
-```text
-POST https://api.github.com/repos/anadyrov/sz-loto-notifier/dispatches
-Authorization: Bearer <WATCHDOG_PAT>
-Accept: application/vnd.github+json
-Content-Type: application/json
-
-{"event_type":"watchdog"}
-```
-
-Важно: один только GitHub Actions не может надежно обнаружить, что его собственный cron не запустился.
-Внешний cron является независимым контролем. Watchdog сам не отправляет результаты и не создает дубли.
+`--probe` не отправляет сообщение: он вызывает Telegram `getMe` и проверяет последние данные обеих игр.
