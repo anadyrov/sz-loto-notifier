@@ -1,7 +1,6 @@
 import asyncio
 import argparse
 import json
-import html
 import os
 import re
 import time
@@ -18,7 +17,7 @@ from playwright.async_api import async_playwright
 load_dotenv()
 
 SRV_URL = "https://sz.kz/srv"
-MIRROR_URL = "https://lucky-numbers.ru/lottery/kz/5x36"
+MIRROR_URL = "https://lucky-numbers.ru/api/v1/lottery/kz/5x36/results?limit=10"
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Asia/Almaty"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
@@ -155,51 +154,34 @@ async def fetch_official_result(lottery: dict, target_date=None) -> dict | None:
             await browser.close()
 
 
-def parse_mirror_results(page_html: str) -> list[dict]:
-    results = []
-    rows = re.findall(
-        r'<tr class="lresults-row[\s\S]*?</tr>', page_html, re.IGNORECASE
-    )
-    for row in rows:
-        balls = []
-        for button in re.findall(r"<button[^>]*>([\s\S]*?)</button>", row, re.IGNORECASE):
-            value = re.sub(r"<[^>]+>", "", button).strip()
-            if value.isdigit() and 1 <= int(value) <= 36:
-                balls.append(int(value))
-        date_match = re.search(r"<time[^>]*>(\d{2}\.\d{2}\.\d{2}),", row)
-        text = html.unescape(re.sub(r"<[^>]+>", " ", row))
-        text = re.sub(r"\s+", " ", text).strip()
-        draw_match = re.search(
-            r"(\d[\d ]*)\s+(\d{2}\.\d{2}\.\d{2}),\s*21:00", text
-        )
-        if len(balls) >= 5 and date_match and draw_match:
-            date_short = date_match.group(1)
-            results.append(
-                {
-                    "number": str(int(draw_match.group(1).replace(" ", ""))),
-                    "date": f"{date_short[:6]}20{date_short[6:]}",
-                    "numbers": balls[:5],
-                    "bonus_numbers": [],
-                }
-            )
-    return results
-
-
 def fetch_mirror_result(target_date=None) -> dict | None:
     response = requests.get(
         MIRROR_URL,
-        headers={"User-Agent": "Mozilla/5.0 (compatible; Loto536Notifier/1.0)"},
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "Loto536Notifier/1.0",
+        },
         timeout=30,
     )
     response.raise_for_status()
-    results = parse_mirror_results(response.text)
-    if not results:
-        raise RuntimeError("Зеркало не вернуло тиражи 5/36")
-    if target_date is None:
-        return results[0]
-    for result in results:
-        if datetime.strptime(result["date"], "%d.%m.%Y").date() == target_date:
-            return result
+    documents = response.json().get("docs", [])
+    if not documents:
+        raise RuntimeError("API зеркала не вернул тиражи 5/36")
+    for document in documents:
+        draw_datetime = datetime.fromisoformat(
+            document["date"].replace("Z", "+00:00")
+        ).astimezone(TIMEZONE)
+        if target_date is not None and draw_datetime.date() != target_date:
+            continue
+        played = document.get("played") or []
+        if not played or len(played[0].get("balls", [])) != 5:
+            continue
+        return {
+            "number": str(document["number"]),
+            "date": draw_datetime.strftime("%d.%m.%Y"),
+            "numbers": [int(value) for value in played[0]["balls"]],
+            "bonus_numbers": [],
+        }
     return None
 
 
