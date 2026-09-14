@@ -48,7 +48,7 @@ jobs:
           POLL_SECONDS: "60"
         shell: bash
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "${{ github.event.client_payload.probe }}" = "true" ]; then
             python main.py --probe
           else
             python main.py --window
