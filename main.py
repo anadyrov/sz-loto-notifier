@@ -17,7 +17,6 @@ from playwright.async_api import async_playwright
 load_dotenv()
 
 SRV_URL = "https://sz.kz/srv"
-MIRROR_URL = "https://lucky-numbers.ru/api/v1/lottery/kz/5x36/results?limit=10"
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Asia/Almaty"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "60"))
 SMS_ENABLED = os.getenv("SMS_ENABLED", "false").lower() == "true"
@@ -26,12 +25,27 @@ MOBIZON_API_KEY = os.getenv("MOBIZON_API_KEY", "")
 LOTTERIES = [
     {
         "name": "Loto 5/36",
+        "slug": "536",
         "url": "https://sz.kz/resultsGame?gAlias=bet_sz_536",
+        "mirror_url": "https://lucky-numbers.ru/api/v1/lottery/kz/5x36/results?limit=10",
+        "ball_count": 5,
         "game_id": "1084",
         "hour": 21,
         "minute": 5,
         "state_file": Path("last_draw_536.txt"),
         "status_file": Path("status_536.json"),
+    },
+    {
+        "name": "Loto 6/49",
+        "slug": "649",
+        "url": "https://sz.kz/resultsGame?gAlias=bet_sz_649",
+        "mirror_url": "https://lucky-numbers.ru/api/v1/lottery/kz/6x49/results?limit=10",
+        "ball_count": 6,
+        "game_id": "1079",
+        "hour": 22,
+        "minute": 5,
+        "state_file": Path("last_draw_649.txt"),
+        "status_file": Path("status_649.json"),
     },
 ]
 
@@ -96,7 +110,7 @@ async def fetch_official_result(lottery: dict, target_date=None) -> dict | None:
                     const title = document.title || '';
                     const text = document.body?.innerText || '';
                     return !/just a moment|один момент/i.test(title)
-                        && /Loto\s*5\/36|Результаты тираж/i.test(text);
+                        && /Loto\s*(5\/36|6\/49)|Результаты тираж/i.test(text);
                 }""",
                 timeout=90_000,
             )
@@ -154,19 +168,19 @@ async def fetch_official_result(lottery: dict, target_date=None) -> dict | None:
             await browser.close()
 
 
-def fetch_mirror_result(target_date=None) -> dict | None:
+def fetch_mirror_result(lottery: dict, target_date=None) -> dict | None:
     response = requests.get(
-        MIRROR_URL,
+        lottery["mirror_url"],
         headers={
             "Accept": "application/json",
-            "User-Agent": "Loto536Notifier/1.0",
+            "User-Agent": "SzLotoNotifier/1.0",
         },
         timeout=30,
     )
     response.raise_for_status()
     documents = response.json().get("docs", [])
     if not documents:
-        raise RuntimeError("API зеркала не вернул тиражи 5/36")
+        raise RuntimeError(f"API зеркала не вернул тиражи {lottery['name']}")
     for document in documents:
         draw_datetime = datetime.fromisoformat(
             document["date"].replace("Z", "+00:00")
@@ -174,20 +188,24 @@ def fetch_mirror_result(target_date=None) -> dict | None:
         if target_date is not None and draw_datetime.date() != target_date:
             continue
         played = document.get("played") or []
-        if not played or len(played[0].get("balls", [])) != 5:
+        if not played or len(played[0].get("balls", [])) != lottery["ball_count"]:
             continue
         return {
             "number": str(document["number"]),
             "date": draw_datetime.strftime("%d.%m.%Y"),
             "numbers": [int(value) for value in played[0]["balls"]],
-            "bonus_numbers": [],
+            "bonus_numbers": [
+                int(value)
+                for group in played[1:]
+                for value in group.get("balls", [])
+            ],
         }
     return None
 
 
 async def fetch_result(lottery: dict, target_date=None) -> dict | None:
     try:
-        return fetch_mirror_result(target_date)
+        return fetch_mirror_result(lottery, target_date)
     except Exception as mirror_error:
         print(f"Ошибка зеркала, пробую SZ.KZ: {mirror_error}", flush=True)
         return await fetch_official_result(lottery, target_date)
@@ -323,9 +341,19 @@ async def main() -> None:
         action="store_true",
         help="проверить Telegram и получение SZ.KZ без отправки сообщения",
     )
+    parser.add_argument(
+        "--game",
+        choices=["536", "649"],
+        help="проверять только указанную лотерею",
+    )
     arguments = parser.parse_args()
+    selected_lotteries = (
+        [lottery for lottery in LOTTERIES if lottery["slug"] == arguments.game]
+        if arguments.game
+        else LOTTERIES
+    )
     if arguments.test_telegram:
-        telegram_send("Loto 5/36: Telegram-уведомления работают ✅")
+        telegram_send("Loto 5/36 и 6/49: Telegram-уведомления работают ✅")
         print("Тестовое сообщение Telegram отправлено", flush=True)
         return
     if arguments.probe:
@@ -336,20 +364,21 @@ async def main() -> None:
         response.raise_for_status()
         if not response.json().get("ok"):
             raise RuntimeError("Telegram Bot API не подтвердил токен")
-        result = await fetch_latest_result(LOTTERIES[0])
-        if result is None:
-            raise RuntimeError("SZ.KZ не вернул ни одного тиража 5/36")
-        print(
-            f"Облачная проверка успешна: Telegram OK, SZ.KZ тираж {result['number']}",
-            flush=True,
-        )
+        for lottery in selected_lotteries:
+            result = await fetch_latest_result(lottery)
+            if result is None:
+                raise RuntimeError(f"Источник не вернул ни одного тиража {lottery['name']}")
+            print(
+                f"Облачная проверка успешна: Telegram OK, {lottery['name']} тираж {result['number']}",
+                flush=True,
+            )
         return
     if arguments.latest:
-        for lottery in LOTTERIES:
+        for lottery in selected_lotteries:
             await run_lottery(lottery, force_latest=True)
         return
     if arguments.once:
-        for lottery in LOTTERIES:
+        for lottery in selected_lotteries:
             try:
                 await run_lottery(lottery)
             except Exception as error:
@@ -359,7 +388,7 @@ async def main() -> None:
         started_at = time.monotonic()
         successful_checks = 0
         while time.monotonic() - started_at < 3 * 60 * 60:
-            for lottery in LOTTERIES:
+            for lottery in selected_lotteries:
                 try:
                     done = await run_lottery(lottery)
                     successful_checks += 1
@@ -372,7 +401,7 @@ async def main() -> None:
             raise RuntimeError("За всё окно не удалось ни разу проверить SZ.KZ")
         return
     while True:
-        for lottery in LOTTERIES:
+        for lottery in selected_lotteries:
             try:
                 await run_lottery(lottery)
             except Exception as error:

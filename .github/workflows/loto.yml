@@ -1,15 +1,15 @@
-name: Loto 5/36 notifier
+name: Loto 5/36 and 6/49 notifier
 
 on:
   repository_dispatch:
-    types: [watchdog]
+    types: [watchdog, loto536, loto649]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: loto-536-notifier
+  group: loto-${{ github.event.action || 'manual' }}-notifier
   cancel-in-progress: false
 
 jobs:
@@ -26,8 +26,10 @@ jobs:
           path: |
             last_draw_536.txt
             status_536.json
-          key: loto-536-state-${{ github.run_id }}
-          restore-keys: loto-536-state-
+            last_draw_649.txt
+            status_649.json
+          key: loto-state-${{ github.run_id }}
+          restore-keys: loto-state-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -50,13 +52,15 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "${{ github.event.client_payload.probe }}" = "true" ]; then
             python main.py --probe
+          elif [ "${{ github.event.action }}" = "loto649" ]; then
+            python main.py --window --game 649
           else
-            python main.py --window
+            python main.py --window --game 536
           fi
 
       - name: Prepare notifier state
         if: always()
-        run: touch last_draw_536.txt status_536.json
+        run: touch last_draw_536.txt status_536.json last_draw_649.txt status_649.json
 
       - name: Save notifier state
         uses: actions/cache/save@v5
@@ -65,4 +69,6 @@ jobs:
           path: |
             last_draw_536.txt
             status_536.json
-          key: loto-536-state-${{ github.run_id }}
+            last_draw_649.txt
+            status_649.json
+          key: loto-state-${{ github.run_id }}
