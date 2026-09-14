@@ -385,13 +385,6 @@ async def main() -> None:
                 print(f"Ошибка проверки {lottery['name']}: {error}", flush=True)
         return
     if arguments.window:
-        now = datetime.now(TIMEZONE)
-        if all(
-            (now.hour, now.minute) < (lottery["hour"], lottery["minute"])
-            for lottery in selected_lotteries
-        ):
-            print("Запуск выполнен до времени тиража; проверка завершена", flush=True)
-            return
         started_at = time.monotonic()
         successful_checks = 0
         while time.monotonic() - started_at < 3 * 60 * 60:
