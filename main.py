@@ -271,10 +271,31 @@ async def main() -> None:
         action="store_true",
         help="отправить тестовое сообщение в Telegram и завершить работу",
     )
+    parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="проверить Telegram и получение SZ.KZ без отправки сообщения",
+    )
     arguments = parser.parse_args()
     if arguments.test_telegram:
         telegram_send("Loto 5/36: Telegram-уведомления работают ✅")
         print("Тестовое сообщение Telegram отправлено", flush=True)
+        return
+    if arguments.probe:
+        token = os.environ["TELEGRAM_BOT_TOKEN"]
+        response = requests.get(
+            f"https://api.telegram.org/bot{token}/getMe", timeout=30
+        )
+        response.raise_for_status()
+        if not response.json().get("ok"):
+            raise RuntimeError("Telegram Bot API не подтвердил токен")
+        result = await fetch_latest_result(LOTTERIES[0])
+        if result is None:
+            raise RuntimeError("SZ.KZ не вернул ни одного тиража 5/36")
+        print(
+            f"Облачная проверка успешна: Telegram OK, SZ.KZ тираж {result['number']}",
+            flush=True,
+        )
         return
     if arguments.latest:
         for lottery in LOTTERIES:
