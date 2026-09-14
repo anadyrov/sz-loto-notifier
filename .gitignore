@@ -3,3 +3,4 @@ __pycache__/
 .venv/
 last_draw_*.txt
 status_*.json
+logs/

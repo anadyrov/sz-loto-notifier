@@ -1,16 +1,18 @@
-name: Loto results notifier
+name: Loto 5/36 notifier
 
 on:
-  schedule:
-    # Start at 21:05 Asia/Almaty (16:05 UTC), then poll every minute.
-    - cron: "5 16 * * *"
+  repository_dispatch:
+    types: [watchdog]
   workflow_dispatch:
+  schedule:
+    # Emergency fallback only. Primary trigger is cron-job.org.
+    - cron: "5 16 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: loto-results-notifier
+  group: loto-536-notifier
   cancel-in-progress: false
 
 jobs:
@@ -25,10 +27,10 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: |
-            last_draw_*.txt
-            status_*.json
-          key: loto-state-${{ github.run_id }}
-          restore-keys: loto-state-
+            last_draw_536.txt
+            status_536.json
+          key: loto-536-state-${{ github.run_id }}
+          restore-keys: loto-536-state-
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -40,26 +42,24 @@ jobs:
           python -m pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Check lottery results once
+      - name: Poll SZ.KZ and notify Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SMS_ENABLED: ${{ secrets.SMS_ENABLED }}
-          SMS_PHONE: ${{ secrets.SMS_PHONE }}
-          MOBIZON_API_KEY: ${{ secrets.MOBIZON_API_KEY }}
+          SMS_ENABLED: "false"
+          TIMEZONE: Asia/Almaty
+          POLL_SECONDS: "60"
         run: python main.py --window
 
       - name: Prepare notifier state
         if: always()
-        run: |
-          touch last_draw_536.txt last_draw_649.txt status_536.json status_649.json
-          echo "State files ready for cache"
+        run: touch last_draw_536.txt status_536.json
 
-      - name: Cache notifier state
+      - name: Save notifier state
         uses: actions/cache/save@v5
         if: always()
         with:
           path: |
-            last_draw_*.txt
-            status_*.json
-          key: loto-state-${{ github.run_id }}
+            last_draw_536.txt
+            status_536.json
+          key: loto-536-state-${{ github.run_id }}

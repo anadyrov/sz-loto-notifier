@@ -32,15 +32,6 @@ LOTTERIES = [
         "state_file": Path("last_draw_536.txt"),
         "status_file": Path("status_536.json"),
     },
-    {
-        "name": "Loto 6/49",
-        "url": "https://sz.kz/resultsGame?gAlias=bet_sz_649",
-        "game_id": "1079",
-        "hour": 22,
-        "minute": 5,
-        "state_file": Path("last_draw_649.txt"),
-        "status_file": Path("status_649.json"),
-    },
 ]
 
 
@@ -216,11 +207,11 @@ def send_status_once(lottery: dict, status: str, message: str, current_date: str
         mark_status(lottery, status, current_date)
 
 
-async def run_lottery(lottery: dict, force_latest: bool = False) -> None:
+async def run_lottery(lottery: dict, force_latest: bool = False) -> bool:
     now = datetime.now(TIMEZONE)
     cutoff = (lottery["hour"], lottery["minute"])
     if not force_latest and (now.hour, now.minute) < cutoff:
-        return
+        return False
     current_date = now.strftime("%d.%m.%Y")
     try:
         result = await (
@@ -244,9 +235,9 @@ async def run_lottery(lottery: dict, force_latest: bool = False) -> None:
                 current_date,
             )
         print(f"Результат {lottery['name']} еще не опубликован", flush=True)
-        return
+        return False
     if not force_latest and already_sent(lottery, result["number"]):
-        return
+        return True
     message = make_message(lottery, result)
     telegram_send(message)
     try:
@@ -255,6 +246,7 @@ async def run_lottery(lottery: dict, force_latest: bool = False) -> None:
         print(f"SMS не отправлено для {lottery['name']}: {error}", flush=True)
     mark_sent(lottery, result["number"])
     print(f"Отправлен результат {lottery['name']} тиража {result['number']}", flush=True)
+    return True
 
 
 async def main() -> None:
@@ -274,13 +266,19 @@ async def main() -> None:
         action="store_true",
         help="проверять каждую минуту в течение вечернего окна и завершиться",
     )
+    parser.add_argument(
+        "--test-telegram",
+        action="store_true",
+        help="отправить тестовое сообщение в Telegram и завершить работу",
+    )
     arguments = parser.parse_args()
+    if arguments.test_telegram:
+        telegram_send("Loto 5/36: Telegram-уведомления работают ✅")
+        print("Тестовое сообщение Telegram отправлено", flush=True)
+        return
     if arguments.latest:
-        try:
-            for lottery in LOTTERIES:
-                await run_lottery(lottery, force_latest=True)
-        except Exception as error:
-            print(f"Ошибка разовой проверки: {error}", flush=True)
+        for lottery in LOTTERIES:
+            await run_lottery(lottery, force_latest=True)
         return
     if arguments.once:
         for lottery in LOTTERIES:
@@ -291,13 +289,19 @@ async def main() -> None:
         return
     if arguments.window:
         started_at = time.monotonic()
+        successful_checks = 0
         while time.monotonic() - started_at < 3 * 60 * 60:
             for lottery in LOTTERIES:
                 try:
-                    await run_lottery(lottery)
+                    done = await run_lottery(lottery)
+                    successful_checks += 1
+                    if done:
+                        return
                 except Exception as error:
                     print(f"Ошибка проверки {lottery['name']}: {error}", flush=True)
             await asyncio.sleep(POLL_SECONDS)
+        if successful_checks == 0:
+            raise RuntimeError("За всё окно не удалось ни разу проверить SZ.KZ")
         return
     while True:
         for lottery in LOTTERIES:
