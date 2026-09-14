@@ -4,9 +4,6 @@ on:
   repository_dispatch:
     types: [watchdog]
   workflow_dispatch:
-  schedule:
-    # Emergency fallback only. Primary trigger is cron-job.org.
-    - cron: "5 16 * * *"
 
 permissions:
   contents: read
