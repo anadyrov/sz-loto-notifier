@@ -2,7 +2,7 @@ name: Loto 5/36 and 6/49 notifier
 
 on:
   repository_dispatch:
-    types: [watchdog, loto536, loto649]
+    types: [watchdog, loto536, loto649, telegramtest, recover536, recover649]
   workflow_dispatch:
 
 permissions:
@@ -50,7 +50,13 @@ jobs:
           POLL_SECONDS: "60"
         shell: bash
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "${{ github.event.client_payload.probe }}" = "true" ]; then
+          if [ "${{ github.event.action }}" = "telegramtest" ]; then
+            python main.py --test-telegram
+          elif [ "${{ github.event.action }}" = "recover536" ]; then
+            python main.py --latest --game 536
+          elif [ "${{ github.event.action }}" = "recover649" ]; then
+            python main.py --latest --game 649
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || [ "${{ github.event.client_payload.probe }}" = "true" ]; then
             python main.py --probe
           elif [ "${{ github.event.action }}" = "loto649" ]; then
             python main.py --window --game 649
