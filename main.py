@@ -3,8 +3,7 @@ import argparse
 import json
 import os
 import re
-import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode
 from zoneinfo import ZoneInfo
@@ -358,12 +357,21 @@ async def main() -> None:
         return
     if arguments.probe:
         token = os.environ["TELEGRAM_BOT_TOKEN"]
+        chat_id = os.environ["TELEGRAM_CHAT_ID"]
         response = requests.get(
             f"https://api.telegram.org/bot{token}/getMe", timeout=30
         )
         response.raise_for_status()
         if not response.json().get("ok"):
             raise RuntimeError("Telegram Bot API не подтвердил токен")
+        response = requests.get(
+            f"https://api.telegram.org/bot{token}/getChat",
+            params={"chat_id": chat_id},
+            timeout=30,
+        )
+        response.raise_for_status()
+        if not response.json().get("ok"):
+            raise RuntimeError("Telegram Bot API не подтвердил доступ к чату")
         for lottery in selected_lotteries:
             result = await fetch_latest_result(lottery)
             if result is None:
@@ -385,21 +393,22 @@ async def main() -> None:
                 print(f"Ошибка проверки {lottery['name']}: {error}", flush=True)
         return
     if arguments.window:
-        started_at = time.monotonic()
-        successful_checks = 0
-        while time.monotonic() - started_at < 3 * 60 * 60:
+        now = datetime.now(TIMEZONE)
+        latest_cutoff = max(
+            now.replace(hour=lottery["hour"], minute=lottery["minute"], second=0, microsecond=0)
+            for lottery in selected_lotteries
+        )
+        deadline = latest_cutoff + timedelta(hours=3)
+        while datetime.now(TIMEZONE) < deadline:
             for lottery in selected_lotteries:
                 try:
                     done = await run_lottery(lottery)
-                    successful_checks += 1
                     if done:
                         return
                 except Exception as error:
                     print(f"Ошибка проверки {lottery['name']}: {error}", flush=True)
             await asyncio.sleep(POLL_SECONDS)
-        if successful_checks == 0:
-            raise RuntimeError("За всё окно не удалось ни разу проверить SZ.KZ")
-        return
+        raise RuntimeError("За всё окно результат не был доставлен")
     while True:
         for lottery in selected_lotteries:
             try:
