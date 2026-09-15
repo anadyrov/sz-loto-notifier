@@ -15,7 +15,7 @@ concurrency:
 jobs:
   check-results:
     runs-on: ubuntu-latest
-    timeout-minutes: 200
+    timeout-minutes: 260
     steps:
       - name: Check out project
         uses: actions/checkout@v5
